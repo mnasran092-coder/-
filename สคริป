@@ -1,0 +1,132 @@
+-- ServerScriptService/MapLighting
+local Lighting = game:GetService("Lighting")
+
+-- การตั้งค่าสว่างตัวอย่าง (ปรับค่าได้)
+Lighting.Brightness = 2        -- ปรับความสว่างทั่วไป
+Lighting.ClockTime = 14       -- เวลาในเกม (0-24) 14 = กลางวัน
+Lighting.Ambient = Color3.fromRGB(200,200,200)
+Lighting.OutdoorAmbient = Color3.fromRGB(200,200,200)
+Lighting.GlobalShadows = true -- เปิด/ปิดเงา
+Lighting.FogEnd = 1000        -- ปรับระยะหมอก
+Lighting.FogStart = 0
+
+-- ถ้าต้องการเพิ่มไฟกลางแผนที่ เช่น สร้าง PointLight บน SpawnLocation
+local function addMapLight(position, range, brightness)
+    local p = Instance.new("Part")
+    p.Anchored = true
+    p.CanCollide = false
+    p.Size = Vector3.new(1,1,1)
+    p.Transparency = 1
+    p.Position = position
+    p.Parent = workspace
+
+    local pl = Instance.new("PointLight")
+    pl.Range = range or 40
+    pl.Brightness = brightness or 2
+    pl.Parent = p
+end
+
+-- ตัวอย่าง: เพิ่มไฟที่ศูนย์แมพ (ปรับพิกัดตามแมพคุณ)
+-- addMapLight(Vector3.new(0,10,0), 80, 3)-- StarterCharacterScripts/SpeedBoostClient
+local character = script.Parent
+local humanoid = character:WaitForChild("Humanoid")
+local DEFAULT_SPEED = 16  -- ค่าเริ่มต้น (ปรับให้ตรงกับเกมของคุณ)
+local BOOST_MULTIPLIER = 1.6 -- เพิ่มความเร็ว (1.6 = +60%)
+local boostEnabled = true    -- ปรับเป็น true/false หรือควบคุมด้วยค่าใน Server
+
+local function applySpeed()
+    if humanoid then
+        humanoid.WalkSpeed = DEFAULT_SPEED * BOOST_MULTIPLIER
+    end
+end
+
+local function resetSpeed()
+    if humanoid then
+        humanoid.WalkSpeed = DEFAULT_SPEED
+    end
+end
+
+-- ตอน spawn ตั้งค่า
+applySpeed()
+
+-- รีเซ็ตเมื่อตายแล้ว respawn
+humanoid.Died:Connect(function()
+    -- จะถูกเรียกเมื่อ respawn, สคริปต์ตัวนี้จะรันใหม่เมื่อ Character ถูกสร้างใหม่
+end)-- ServerScriptService/AutoWoodcut
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local workspace = game:GetService("Workspace")
+
+local TREES_FOLDER_NAME = "Trees" -- ชื่อ folder ที่เก็บต้นไม้ใน Workspace
+local CUT_DISTANCE = 6           -- ระยะที่ทำการตัดได้ (ปรับได้)
+local WOOD_PER_CUT = 1           -- ไม้ได้ต่อครั้ง
+local COOLDOWN = 1.0             -- ดีเลย์ระหว่างการเก็บไม้จากผู้เล่นคนเดียว (วินาที)
+
+local treeFolder = workspace:FindFirstChild(TREES_FOLDER_NAME)
+if not treeFolder กลางวัน   warn("Folder '"..TREES_FOLDER_NAME.."' not found in Workspace. สร้าง Folder ชื่อ Trees และใส่โมเดลต้นไม้เข้าไป")
+end
+
+-- เก็บ cooldown per player per tree (เพื่อป้องกัน spam)
+local lastCut = {} -- lastCut[player.UserId][tree] = tick()
+
+local function getTrunkPosition(tree)
+    -- พยายามหา Part ที่ชื่อ Trunk หรือใช้ PrimaryPart
+    if tree:FindFirstChild("Trunk") and tree.Trunk:IsA("BasePart") then
+        return tree.Trunk.Position
+    elseif tree.PrimaryPart then
+        return tree.PrimaryPart.Position
+    else
+        -- fallback: หา first BasePart
+        for _, p in pairs(tree:GetChildren()) do
+            if p:IsA("BasePart") then
+                return p.Position
+            end
+        end
+    end
+    return nil
+end
+
+RunService.Heartbeat:Connect(function()
+    if not treeFolder then return end
+    for _, player in pairs(Players:GetPlayers()) do
+        if player.Character and player.Character:FindFirstChild("HumanoidRootPart") and player:FindFirstChild("leaderstats") then
+            local rootPos = player.Character.HumanoidRootPart.Position
+            local uid = player.UserId
+            lastCut[uid] = lastCut[uid] or {}
+
+            for _, tree in pairs(treeFolder:GetChildren()) do
+                if tree:IsA("Model") and tree.Name == "Tree" then
+                    local trunkPos = getTrunkPosition(tree)
+                    if trunkPos then
+                        local dist = (trunkPos - rootPos).Magnitude
+                        if dist <= CUT_DISTANCE then
+                            -- check cooldown
+                            local key = tree:GetDebugId() -- unique-ish key per instance
+                            local t = lastCut[uid][key] or 0
+                            if tick() - t >= COOLDOWN then
+                                -- ให้ไม้กับผู้เล่น (server-side)
+                                local woodVal = player.leaderstats:FindFirstChild("Wood")
+                                if woodVal then
+                                    woodVal.Value = woodVal.Value + WOOD_PER_CUT
+                                end
+                                lastCut[uid][key] = tick()
+
+                                -- visual: ทำเอฟเฟ็กต์เล็กน้อย (optional)
+                                -- ถ้าต้องการให้ต้นไม้ถูกทำลายจริง ให้ทำลายหรือเล่นอนิเมชัน
+                                if tree:FindFirstChild("Trunk") then
+                                    local part = tree.Trunk
+                                    local v = Instance.new("ParticleEmitter")
+                                    v.Speed = NumberRange.new(1,3)
+                                    v.Lifetime = NumberRange.new(0.3)
+                                    v.Rate = 50
+                                    v.Parent = part
+                                    game:GetService("Debris"):AddItem(v, 0.4)
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+end)
